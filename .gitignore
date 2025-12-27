@@ -1,0 +1,29 @@
+
+# Virtual environments
+venv/
+*/venv/
+# Python
+__pycache__/
+*.pyc
+.env
+.env.*
+*.sqlite3
+
+# Django
+staticfiles/
+media/
+
+# Node
+node_modules/
+dist/
+
+# Docker volumes
+rabbitmq-data/
+postgres-data/
+docker-data/
+
+# OS / IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
