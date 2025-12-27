@@ -1,0 +1,234 @@
+
+
+services:
+
+
+  postgres_auth:
+    image: postgres:14
+    container_name: postgres_auth
+    restart: always
+    environment:
+      POSTGRES_DB: authdb
+      POSTGRES_USER: synq
+      POSTGRES_PASSWORD: synqpassword
+    volumes:
+      - auth_pgdata:/var/lib/postgresql/data
+
+  postgres_team:
+    image: postgres:14
+    container_name: postgres_team
+    restart: always
+    environment:
+      POSTGRES_DB: teamdb
+      POSTGRES_USER: synq
+      POSTGRES_PASSWORD: synqpassword
+    volumes:
+      - team_pgdata:/var/lib/postgresql/data
+
+  postgres_task:
+    image: postgres:14
+    container_name: postgres_task
+    restart: always
+    environment:
+      POSTGRES_DB: taskdb
+      POSTGRES_USER: synq
+      POSTGRES_PASSWORD: synqpassword
+    volumes:
+      - task_pgdata:/var/lib/postgresql/data
+
+  postgres_chat:
+    image: postgres:14
+    container_name: postgres_chat
+    restart: always
+    environment:
+      POSTGRES_DB: chatdb
+      POSTGRES_USER: synq
+      POSTGRES_PASSWORD: synqpassword
+    volumes:
+      - chat_pgdata:/var/lib/postgresql/data
+
+
+
+  redis:
+    image: redis:7
+    container_name: redis_main
+    restart: always
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq_main
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+
+
+  auth_service:
+    build: ./auth_service
+    container_name: auth_service
+    restart: always
+    env_file:
+      - ./auth_service/.env
+    depends_on:
+      postgres_auth:
+        condition: service_started
+      redis:
+        condition: service_started
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./auth_service:/app
+    command: >
+      sh -c "
+      python manage.py wait_for_db &&
+      python manage.py migrate &&
+      python manage.py runserver 0.0.0.0:8001
+      "
+
+  auth_worker:
+    build: ./auth_service
+    container_name: auth_worker
+    restart: always
+    env_file:
+      - ./auth_service/.env
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+      - ./auth_service:/app
+    command: celery -A auth_service worker --loglevel=info
+
+  auth_rpc_worker:
+    build: ./auth_service
+    container_name: auth_rpc_worker
+    restart: always
+    env_file:
+      - ./auth_service/.env
+    depends_on:
+      rabbitmq:
+        condition: service_started
+    volumes:
+      - ./auth_service:/app
+    command: python rabbit.py
+
+
+
+
+  team_service:
+    build: ./team_service
+    container_name: team_service
+    restart: always
+    env_file:
+      - ./team_service/.env
+    depends_on:
+      postgres_team:
+        condition: service_started
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./team_service:/app
+    command: >
+      sh -c "
+      python manage.py migrate &&
+      python manage.py runserver 0.0.0.0:8002
+      "
+
+  team_rpc_worker:
+    build: ./team_service
+    container_name: team_rpc_worker
+    restart: always
+    env_file:
+      - ./team_service/.env
+    depends_on:
+      rabbitmq:
+        condition: service_started
+    volumes:
+      - ./team_service:/app
+    command: python -u teams/rpc_server.py
+
+
+
+  task_service:
+    build: ./task_service
+    container_name: task_service
+    restart: always
+    env_file:
+      - ./task_service/.env
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      team_rpc_worker:
+        condition: service_started
+      postgres_task:
+        condition: service_started
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./task_service:/app
+    command: >
+      sh -c "
+      python manage.py migrate &&
+      gunicorn task_service.wsgi:application --bind 0.0.0.0:8003
+      "
+
+
+  task_rpc_worker:
+    build: ./task_service
+    container_name: task_rpc_worker
+    restart: always
+    env_file:
+      - ./task_service/.env
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      task_service:
+        condition: service_started
+    volumes:
+      - ./task_service:/app
+    command: python tasks/rpc_worker.py
+
+
+  chat_service:
+    build: ./chat_service
+    container_name: chat_service
+    restart: always
+    env_file:
+      - ./chat_service/.env
+    environment:
+      - DJANGO_SETTINGS_MODULE=chat_service.settings
+    depends_on:
+      postgres_chat:
+        condition: service_started
+      redis:
+        condition: service_started
+      auth_rpc_worker:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./chat_service:/app
+    command: >
+      sh -c "
+      python manage.py migrate &&
+      daphne -b 0.0.0.0 -p 8004 chat_service.asgi:application
+      "
+
+
+volumes:
+  auth_pgdata:
+  team_pgdata:
+  task_pgdata:
+  chat_pgdata:
