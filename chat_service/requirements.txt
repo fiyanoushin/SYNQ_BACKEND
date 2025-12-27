@@ -1,0 +1,13 @@
+Django>=4.2,<5.0
+djangorestframework
+channels>=4.0
+channels-redis
+pika
+psycopg2-binary
+daphne
+python-dotenv
+boto3
+channels-redis>=4.1
+pika>=1.3
+django-cors-headers
+openai>=1.0.0
