@@ -1,4 +1,3 @@
-# chat/team_rpc.py
 import json
 import uuid
 import time

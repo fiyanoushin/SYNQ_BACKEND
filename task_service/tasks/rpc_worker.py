@@ -1,14 +1,18 @@
+import os
+import sys
 import json
 import pika
-import os
 import django
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "task_service.settings")
 django.setup()
 
 from tasks.models import Task
 
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+
 QUEUE_NAME = "task_rpc_queue"
 
 
@@ -65,15 +69,28 @@ def on_request(ch, method, props, body):
 
 
 def main():
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters(host=RABBITMQ_HOST)
+    credentials = pika.PlainCredentials(
+        os.getenv("RABBITMQ_USER", "user"),
+        os.getenv("RABBITMQ_PASS", "password"),
     )
+
+    connection = pika.BlockingConnection(
+        pika.ConnectionParameters(
+            host=os.getenv("RABBITMQ_HOST", "rabbitmq"),
+            port=int(os.getenv("RABBITMQ_PORT", 5672)),
+            virtual_host=os.getenv("RABBITMQ_VHOST", "/"),
+            credentials=credentials,
+            heartbeat=60,
+            blocked_connection_timeout=30,
+        )
+    )
+
     channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME)
+    channel.queue_declare(queue=QUEUE_NAME, durable=True)
     channel.basic_qos(prefetch_count=1)
     channel.basic_consume(queue=QUEUE_NAME, on_message_callback=on_request)
 
-    print(" Task RPC Worker started")
+    print("Task RPC Worker started")
     channel.start_consuming()
 
 

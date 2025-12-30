@@ -2,23 +2,27 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .auth import authenticate_request
+from .permissions import IsAuthenticatedByAuthService
 from .team_rpc import TeamRPCClient
 from .task_rpc import TaskRPCClient
 from .openai_client import ask_ai
 
 
 class ChatBotView(APIView):
-    permission_classes = []
+    permission_classes = [IsAuthenticatedByAuthService]
 
     def post(self, request):
-        user = authenticate_request(request)
-        if not user:
-            return Response({"detail": "Unauthorized"}, status=401)
-
-        message = request.data.get("message", "").lower()
+        user = request.auth_user
         user_id = user["id"]
 
+        message = request.data.get("message", "").lower()
+        if not message:
+            return Response(
+                {"detail": "message is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        
         if "my task" in message or "assigned to me" in message:
             task_rpc = TaskRPCClient()
             try:
@@ -41,14 +45,20 @@ class ChatBotView(APIView):
             finally:
                 team_rpc.close()
 
-            names = [m["name"] for m in members]
+            if not members:
+                return Response({"reply": "You are not part of any team."})
+
+            names = [m.get("name", "Unknown") for m in members]
             return Response({
                 "reply": "Your team members are: " + ", ".join(names)
             })
 
         ai_reply = ask_ai(
             user_message=message,
-            system_context=f"You are assisting user {user_id} inside a task management app."
+            system_context=(
+                f"You are assisting user {user_id} "
+                f"inside a task management app."
+            )
         )
 
         return Response({"reply": ai_reply})

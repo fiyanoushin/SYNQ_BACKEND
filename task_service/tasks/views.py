@@ -1,8 +1,8 @@
 import uuid
 import boto3
+
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from django.db import models
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -17,6 +17,8 @@ from .permissions import IsAuthenticatedByAuthService
 from .team_client import TeamRPCClient
 
 
+# ---------- helpers ----------
+
 def create_activity(task, actor_id, action, meta=None):
     TaskActivityLog.objects.create(
         task=task,
@@ -29,6 +31,18 @@ def create_activity(task, actor_id, action, meta=None):
 def get_team_role(user_id, team_id):
     client = TeamRPCClient()
     return client.get_role(user_id, team_id)
+
+
+def ensure_task_access(user, task):
+   
+    role = get_team_role(user["id"], task.team_id)
+    if not role:
+        return False
+
+    if role == "manager":
+        return True
+
+    return task.assigned_to and task.assigned_to == user["id"]
 
 
 
@@ -58,6 +72,7 @@ class CreateTaskView(APIView):
         serializer.is_valid(raise_exception=True)
 
         task = serializer.save(
+            team_id=team_id,
             created_by=user["id"],
             assigned_to=assigned_to,
         )
@@ -73,22 +88,22 @@ class ListTasksView(APIView):
         user = request.auth_user
         team_id = request.query_params.get("team_id")
 
-    
-        if team_id:
-            role = get_team_role(user["id"], team_id)
-            if role != "manager":
-                return Response(
-                    {"detail": "Only managers can view team tasks"},
-                    status=403
-                )
+        if not team_id:
+            return Response({"detail": "team_id required"}, status=400)
 
+        role = get_team_role(user["id"], team_id)
+        if not role:
+            return Response({"detail": "Forbidden"}, status=403)
+
+        if role == "manager":
             tasks = Task.objects.filter(team_id=team_id)
-
         else:
-            tasks = Task.objects.filter(assigned_to=user["id"])
+            tasks = Task.objects.filter(
+                team_id=team_id,
+                assigned_to=user["id"],
+            )
 
         return Response(TaskSerializer(tasks, many=True).data)
-
 
 
 class TaskDetailView(APIView):
@@ -98,11 +113,7 @@ class TaskDetailView(APIView):
         user = request.auth_user
         task = get_object_or_404(Task, pk=pk)
 
-        role = get_team_role(user["id"], task.team_id)
-        if not role:
-            return Response({"detail": "Forbidden"}, status=403)
-
-        if role != "manager" and task.assigned_to != user["id"]:
+        if not ensure_task_access(user, task):
             return Response({"detail": "Not your task"}, status=403)
 
         return Response(TaskSerializer(task).data)
@@ -166,11 +177,7 @@ class ChangeStatusView(APIView):
         user = request.auth_user
         task = get_object_or_404(Task, pk=pk)
 
-        role = get_team_role(user["id"], task.team_id)
-        if not role:
-            return Response({"detail": "Forbidden"}, status=403)
-
-        if role != "manager" and task.assigned_to != user["id"]:
+        if not ensure_task_access(user, task):
             return Response({"detail": "Not your task"}, status=403)
 
         status_val = request.data.get("status")
@@ -191,11 +198,7 @@ class PresignAttachmentView(APIView):
         user = request.auth_user
         task = get_object_or_404(Task, pk=pk)
 
-        role = get_team_role(user["id"], task.team_id)
-        if not role:
-            return Response({"detail": "Forbidden"}, status=403)
-
-        if role != "manager" and task.assigned_to != user["id"]:
+        if not ensure_task_access(user, task):
             return Response({"detail": "Not your task"}, status=403)
 
         filename = request.data.get("filename")
@@ -221,11 +224,7 @@ class ConfirmAttachmentView(APIView):
         user = request.auth_user
         task = get_object_or_404(Task, pk=pk)
 
-        role = get_team_role(user["id"], task.team_id)
-        if not role:
-            return Response({"detail": "Forbidden"}, status=403)
-
-        if role != "manager" and task.assigned_to != user["id"]:
+        if not ensure_task_access(user, task):
             return Response({"detail": "Not your task"}, status=403)
 
         attachment = TaskAttachment.objects.create(
@@ -245,11 +244,7 @@ class TaskLogsView(APIView):
         user = request.auth_user
         task = get_object_or_404(Task, pk=pk)
 
-        role = get_team_role(user["id"], task.team_id)
-        if not role:
-            return Response({"detail": "Forbidden"}, status=403)
-
-        if role != "manager" and task.assigned_to != user["id"]:
+        if not ensure_task_access(user, task):
             return Response({"detail": "Not your task"}, status=403)
 
         logs = task.activity_logs.order_by("-id")

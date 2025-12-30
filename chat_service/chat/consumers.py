@@ -22,6 +22,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         user = await self.authenticate(token)
         if not user:
             await self.close(code=4003)  
+            return
 
         self.user_id = user["id"]
 
