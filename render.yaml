@@ -36,9 +36,7 @@ services:
     env: docker
     dockerContext: .
     dockerfilePath: ./render_rabbitmq.Dockerfile
-    ports:
-      - port: 5672
-      - port: 15672
+
     envVars:
       - key: RABBITMQ_DEFAULT_USER
         value: user
